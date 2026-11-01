@@ -14,9 +14,21 @@ function record(value: unknown): Record<string, unknown> {
 /** 画布重存后列上的 workflow_node_id 常被清空，需回退到 inputJson 里快照的节点 id */
 export function effectiveWorkflowNodeId(task: { workflowNodeId: number | null; inputJson: unknown }): number | null {
   if (task.workflowNodeId != null) return task.workflowNodeId;
-  const raw = record(task.inputJson).workflowNodeId;
-  const id = typeof raw === 'number' ? raw : Number(raw);
-  return Number.isInteger(id) && id > 0 ? id : null;
+  return workflowNodeIdFromSnapshot(record(task.inputJson).workflowNodeId);
+}
+
+/** 只接受正的安全整数，或十进制整数字符串；不做 Boolean/数组/对象的隐式数值转换 */
+function workflowNodeIdFromSnapshot(raw: unknown): number | null {
+  if (typeof raw === 'number') return isPositiveSafeInteger(raw) ? raw : null;
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (!/^\+?\d+$/.test(text)) return null;
+  const id = Number(text);
+  return isPositiveSafeInteger(id) ? id : null;
+}
+
+function isPositiveSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 export function selectRunnableTasks<T extends GraphTask>(tasks: readonly T[]): T[] {
