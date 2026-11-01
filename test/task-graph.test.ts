@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   assertAcyclicGraph,
+  effectiveWorkflowNodeId,
   graphIsComplete,
   plannedTaskStatus,
   reachableFromRoots,
@@ -44,6 +45,60 @@ test('runnable tasks still resolve deps when workflowNodeId column was cleared a
     { id: 3, workflowNodeId: null, status: 'blocked', inputJson: { workflowNodeId: 30, nodeType: 'checkpoint', dependsOnNodeIds: [20] } },
   ];
   assert.deepEqual(selectRunnableTasks(tasks).map((task) => task.id), [2]);
+});
+
+test('effective workflow node id prefers the column value over the input snapshot', () => {
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: 7, inputJson: { workflowNodeId: true } }), 7);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: 7, inputJson: { workflowNodeId: 20 } }), 7);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: 0, inputJson: { workflowNodeId: 20 } }), 0);
+});
+
+test('effective workflow node id falls back to positive safe integers from the input snapshot', () => {
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: { workflowNodeId: 20 } }), 20);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: { workflowNodeId: Number.MAX_SAFE_INTEGER } }), Number.MAX_SAFE_INTEGER);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: { workflowNodeId: '20' } }), 20);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: { workflowNodeId: ' 20 ' } }), 20);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: { workflowNodeId: '020' } }), 20);
+});
+
+test('effective workflow node id rejects non-numeric, non-integer and unsafe fallbacks', () => {
+  const invalid = [
+    true,
+    false,
+    [20],
+    { value: 20 },
+    '',
+    '   ',
+    0,
+    -5,
+    1.5,
+    '1.5',
+    '1e2',
+    'abc',
+    NaN,
+    Infinity,
+    -Infinity,
+    Number.MAX_SAFE_INTEGER + 1,
+    '99999999999999999999',
+  ];
+  for (const workflowNodeId of invalid) {
+    assert.equal(
+      effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: { workflowNodeId } }),
+      null,
+      `workflowNodeId=${String(workflowNodeId)}`,
+    );
+  }
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: {} }), null);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: null }), null);
+  assert.equal(effectiveWorkflowNodeId({ workflowNodeId: null, inputJson: [20] }), null);
+});
+
+test('runnable tasks ignore boolean and array snapshot ids instead of coercing them', () => {
+  const tasks = [
+    { id: 1, workflowNodeId: null, status: 'completed', inputJson: { workflowNodeId: true } },
+    { id: 2, workflowNodeId: null, status: 'blocked', inputJson: { workflowNodeId: [20], dependsOnNodeIds: [1] } },
+  ];
+  assert.deepEqual(selectRunnableTasks(tasks).map((task) => task.id), []);
 });
 
 test('workflow graph rejects cycles and unknown nodes', () => {
